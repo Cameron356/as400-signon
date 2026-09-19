@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# as400-signon — IBM AS/400 / 5250-style Sign On for Linux VT
+#
+# Intended as agetty --login-program (runs as root on a getty TTY).
+# Draws a Sign On screen, collects User + Password, checks via unix_chkpwd,
+# then exec's /bin/login -f so PAM session setup is real login's job.
+# Passwords are never written to logs, disk, or the environment.
+
+set -eu
+umask 077
+
+readonly PROG_NAME="as400-signon"
+readonly LOGIN_BIN="${AS400_LOGIN_BIN:-/bin/login}"
+readonly CHKPWD_BIN="${AS400_CHKPWD_BIN:-/sbin/unix_chkpwd}"
+readonly CHKPWD_BIN_ALT="/usr/sbin/unix_chkpwd"
+
+readonly C_RESET=$'\033[0m'
+readonly C_GREEN=$'\033[0;32m'
+readonly C_BOLD_GREEN=$'\033[1;32m'
+readonly C_BAR=$'\033[0;30;42m'
+readonly C_RED=$'\033[0;31m'
+readonly C_HIDE=$'\033[?25l'
+readonly C_SHOW=$'\033[?25h'
+readonly C_CLEAR=$'\033[2J\033[H'
+
+cols() {
+  local w=${COLUMNS:-0}
+  if [ "$w" -le 0 ] 2>/dev/null; then
+    w=$(stty size 2>/dev/null | awk '{print $2}') || w=80
+  fi
+  # Prefer forced width for screenshots / non-tty capture
+  if [ -n "${AS400_COLS:-}" ]; then
+    w=$AS400_COLS
+  fi
+  printf '%s' "${w:-80}"
+}
+
+sysname() {
+  local h
+  h=${AS400_SYSTEM:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo SYSTEM)}
+  printf '%s' "${h^^}"
+}
+
+now_date() { date "${AS400_DATE_FMT:-+%m/%d/%y}"; }
+now_time() { date "${AS400_TIME_FMT:-+%H:%M:%S}"; }
+
+clear_screen() {
+  printf '%s' "$C_CLEAR"
+}
+
+bar_line() {
+  local text=$1
+  local w pad
+  w=$(cols)
+  if (( ${#text} > w )); then
+    text="${text:0:w}"
+  fi
+  pad=$(( w - ${#text} ))
+  printf '%s%s%*s%s\n' "$C_BAR" "$text" "$pad" '' "$C_RESET"
+}
+
+# Row map (1-based, after clear + home):
+#  1  top bar
+#  2  blank
+#  3  Display meta
+#  4  blank
+#  5  title "Sign On"
+#  6  blank
+#  7  System
+#  8  Subsystem
+#  9  Display
+# 10  blank
+# 11  blank
+# 12  User field
+# 13  Password field
+# 14  blank
+# 15  error line
+# 16  blank
+# 17  footer
+draw_screen() {
+  local err_msg="${1:-}"
+  local sys w left right mid
+  sys=$(sysname)
+  w=$(cols)
+
+  clear_screen
+
+  left=" SIGN ON"
+  right=" SYSTEM:  ${sys}   $(now_date)  $(now_time) "
+  mid=$(( w - ${#left} - ${#right} ))
+  (( mid < 1 )) && mid=1
+  printf -v __line '%s%*s%s' "$left" "$mid" '' "$right"
+  bar_line "$__line"
+
+  printf '%s\n' "$C_GREEN"
+  printf ' Display . . . . . . . . . . . . . . :  %s\n' "${AS400_DISPLAY:-1}"
+  printf '\n'
+  printf '                               Sign On\n'
+  printf '\n'
+  printf '  System  . . . . . . . . . . . . . . :  %s\n' "$sys"
+  printf '  Subsystem . . . . . . . . . . . . . :  %s\n' "${AS400_SUBSYSTEM:-QINTER}"
+  printf '  Display . . . . . . . . . . . . . . :  %s\n' "${TTY_NAME:-${AS400_DISPLAY:-TTY}}"
+  printf '\n'
+  printf '\n'
+  printf '  User  . . . . . . . . . . . . . . . :  %s\n' "${PREFILL_USER:-}"
+  printf '  Password  . . . . . . . . . . . . . :  %s\n' "${PREFILL_PASS_MASK:-}"
+  printf '\n'
+  if [ -n "$err_msg" ]; then
+    printf '%s  %s%s\n' "$C_RED" "$err_msg" "$C_GREEN"
+  else
+    printf '\n'
+  fi
+  printf '\n'
+  printf '  Theme only -- Linux PAM / login(1) authenticates. Passwords are not logged.\n'
+  printf '%s' "$C_RESET"
+}
+
+goto_user_field()      { printf '\033[12;44H'; }
+goto_password_field()  { printf '\033[13;44H'; }
+
+read_field() {
+  local silent=${1:-0} val=
+  if [ "$silent" = 1 ]; then
+    stty -echo 2>/dev/null || true
+    IFS= read -r val || true
+    stty echo 2>/dev/null || true
+    printf '\n' >/dev/tty 2>/dev/null || printf '\n'
+  else
+    IFS= read -r val || true
+  fi
+  val=${val%$'\r'}
+  printf '%s' "$val"
+}
+
+chkpwd_path() {
+  if [ -x "$CHKPWD_BIN" ]; then
+    printf '%s' "$CHKPWD_BIN"
+  elif [ -x "$CHKPWD_BIN_ALT" ]; then
+    printf '%s' "$CHKPWD_BIN_ALT"
+  else
+    return 1
+  fi
+}
+
+authenticate() {
+  local user=$1 password=$2 chk
+  if ! chk=$(chkpwd_path); then
+    return 2
+  fi
+  printf '%s' "$password" | "$chk" "$user" check
+}
+
+wipe() {
+  local -n _ref=$1 2>/dev/null || return 0
+  _ref="$(printf '%*s' "${#_ref}" '' | tr ' ' x)"
+  _ref=''
+}
+
+do_login() {
+  local user=$1
+  if [ ! -x "$LOGIN_BIN" ]; then
+    printf '%s%s: %s not executable%s\n' "$C_RED" "$PROG_NAME" "$LOGIN_BIN" "$C_RESET" >&2
+    sleep 3
+    exit 1
+  fi
+  clear_screen
+  exec "$LOGIN_BIN" -f -- "$user"
+}
+
+# --- modes ------------------------------------------------------------------
+# AS400_SIGNON_DUMP=1  — draw once (optional AS400_SIGNON_ERROR=msg) and exit
+# AS400_SIGNON_UI_ONLY=1 — interactive UI, no PAM / no login -f
+
+if [ "${AS400_SIGNON_DUMP:-0}" = 1 ]; then
+  TTY_NAME=${TTY_NAME:-tty3}
+  export TTY_NAME
+  COLUMNS=${AS400_COLS:-80}
+  export COLUMNS
+  draw_screen "${AS400_SIGNON_ERROR:-}"
+  exit 0
+fi
+
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+  if [ "${AS400_SIGNON_UI_ONLY:-0}" != 1 ]; then
+    printf '%s: refusing to run without a TTY\n' "$PROG_NAME" >&2
+    exit 1
+  fi
+fi
+
+TTY_NAME=$(basename "$(tty 2>/dev/null || echo "${TTY_NAME:-tty3}")")
+export TTY_NAME
+UI_ONLY=${AS400_SIGNON_UI_ONLY:-0}
+
+err=''
+while true; do
+  draw_screen "$err"
+  err=''
+
+  printf '%s' "$C_SHOW"
+  goto_user_field
+  printf '%s' "$C_BOLD_GREEN"
+  user=$(read_field 0)
+  printf '%s' "$C_GREEN"
+
+  if [ -z "${user// /}" ]; then
+    err='User required.'
+    continue
+  fi
+
+  goto_password_field
+  printf '%s' "$C_BOLD_GREEN"
+  password=$(read_field 1)
+  printf '%s' "$C_RESET"
+
+  if [ "$UI_ONLY" = 1 ]; then
+    clear_screen
+    printf '%sUI-only mode: would authenticate user %q%s\n' "$C_GREEN" "$user" "$C_RESET"
+    wipe password
+    exit 0
+  fi
+
+  if [ "$(id -u)" -ne 0 ]; then
+    clear_screen
+    printf '%s%s must run as root (agetty --login-program)%s\n' "$C_RED" "$PROG_NAME" "$C_RESET" >&2
+    wipe password
+    sleep 3
+    exit 1
+  fi
+
+  if authenticate "$user" "$password"; then
+    wipe password
+    do_login "$user"
+    exit 1
+  else
+    wipe password
+    err='Sign-on attempt failed. Check User / Password.'
+    sleep 1
+  fi
+done

@@ -1,0 +1,14 @@
+\e{green}
+\e{black}\e{greenbg} SIGN ON                                                          SYSTEM:  \s   \d  \t \e{reset}
+\e{green}
+ Display . . . . . . . . . . . . . . :  \l
+
+                               Sign On
+
+  System  . . . . . . . . . . . . . . :  \n
+  Subsystem . . . . . . . . . . . . . :  QINTER
+  Display . . . . . . . . . . . . . . :  \l
+
+
+  (Static /etc/issue.d art — interactive Sign On uses agetty --login-program.)
+\e{reset}
