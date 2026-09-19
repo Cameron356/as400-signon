@@ -143,12 +143,29 @@ See [docs/manual-test.md](docs/manual-test.md).
 - Auto-enabling on every getty / hijacking fTower tty1 by default
 - Network authentication UIs beyond what PAM already does
 
-## Target platform
+## Supported platforms
 
-- Debian (and derivatives) using `agetty` + `systemd` getty units
-- Linux virtual terminals (`/dev/ttyN`); serial-getty can use the same binary
-  with a similar drop-in later
-- First deployment target: **fTower** spare VT (tty3), dashboard stays on tty1
+**Works today on Debian and Ubuntu (and close derivatives)** that use:
+
+- `systemd` + `getty@ttyN.service`
+- `agetty` + `/bin/login`
+- `unix_chkpwd` (usual shadow/PAM stack)
+
+System name on the Sign On screen comes from the machine hostname. Auth is
+normal local PAM — any account that can log in at a stock getty can Sign On
+here. Install is opt-in per VT (`--tty N`); nothing Cameron/homelab-specific
+is required at runtime.
+
+**Not “any Linux” yet:**
+
+- No first-class support for non-systemd gettys (OpenRC, BusyBox, etc.)
+- Fedora/Arch/etc. may work with the same drop-in idea, but are untested
+- Graphical greeters (GDM/LightDM/SDDM) are out of scope
+
+The default refusal to install on **tty1** (unless `--force-tty1`) is
+intentional for any machine where tty1 is the primary console — not only
+fTower’s dashboard host.
+
 
 ## Status
 

@@ -23,7 +23,7 @@ Install ${PROG_NAME} for a single virtual terminal (getty@ttyN).
 
 Required / primary:
   --tty N              VT number (1–63). Default if omitted: 3
-  --force-tty1         Allow tty1 (refused by default — fTower dashboard lives there)
+  --force-tty1         Allow tty1 (refused by default — often the primary console)
 
 Options:
   --prefix DIR         Install prefix (default: /usr/local)
@@ -42,7 +42,7 @@ Backups go under /var/backups/as400-signon/<timestamp>/.
 
 Examples:
   sudo ./scripts/install.sh --tty 3
-  sudo ./scripts/install.sh --tty 1 --force-tty1   # do not do this on fTower
+  sudo ./scripts/install.sh --tty 1 --force-tty1   # only if you mean to replace tty1 getty
   ./scripts/install.sh --tty 3 --dry-run
 USAGE
 }
@@ -98,8 +98,8 @@ fi
 if [ "$TTY_NUM" = 1 ] && [ "$FORCE_TTY1" != 1 ]; then
   cat >&2 <<'REFUSE'
 Refusing to install on tty1.
-On fTower, tty1 hosts the console dashboard (hldash / tmux dash). Hijacking
-getty@tty1 would displace it. Re-run with an explicit spare VT, e.g.:
+tty1 is often the primary console (and on some hosts a dashboard). Hijacking
+getty@tty1 would displace whatever is there. Prefer a spare VT, e.g.:
 
   sudo ./scripts/install.sh --tty 3
 
