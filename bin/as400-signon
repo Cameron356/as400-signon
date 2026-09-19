@@ -76,7 +76,6 @@ bar_line() {
 # 14  blank
 # 15  error line
 # 16  blank
-# 17  footer
 draw_screen() {
   local err_msg="${1:-}"
   local sys w left right mid
@@ -110,8 +109,6 @@ draw_screen() {
   else
     printf '\n'
   fi
-  printf '\n'
-  printf '  Theme only -- Linux PAM / login(1) authenticates. Passwords are not logged.\n'
   printf '%s' "$C_RESET"
 }
 
